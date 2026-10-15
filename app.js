@@ -48,7 +48,6 @@ function getData() {
             ...saved,
             history: Array.isArray(saved.history) ? saved.history : []
         };
-
         const dayStartedAt = Date.parse(data.dayStartedAt);
 
         if (!Number.isFinite(dayStartedAt) || Date.now() - dayStartedAt >= DAY_RESET_MS) {
@@ -340,22 +339,6 @@ function setupLogin() {
 
         await handleLogin(doctorName, email, password);
     });
-
-    const savedEmail = localStorage.getItem('opdeasy-remember-email');
-
-    if (savedEmail) {
-        const emailInput = document.getElementById('email');
-
-        if (emailInput) {
-            emailInput.value = savedEmail;
-
-            const rememberCheckbox = document.getElementById('rememberMe');
-
-            if (rememberCheckbox) {
-                rememberCheckbox.checked = true;
-            }
-        }
-    }
 }
 
 function setupRegistration() {
@@ -453,7 +436,7 @@ function renderLivePatientList() {
                 <td>${patient.token}</td>
                 <td>${escapeHtml(patient.name)}</td>
                 <td>${patient.status === 'consulting' ? 'Now serving' : getPosition(patient, data)}</td>
-                <td><span class="status ${patient.status}">${formatStatus(patient.status)}</span></td>
+                <td><span class=\"status ${patient.status}\">${formatStatus(patient.status)}</span></td>
                 <td>${patient.status === 'consulting' ? 'Now' : formatDuration(estimatedWaitSeconds)}</td>
                 <td>${patient.status === 'consulting' ? formatTime(patient.startedAt || patient.createdAt) : expectedAt}</td>
             </tr>`;
@@ -466,8 +449,10 @@ function setupDoctorDashboard() {
 
     document.getElementById('nextBtn').addEventListener('click', serveNextPatient);
     document.getElementById('skipBtn').addEventListener('click', skipCurrentPatient);
-    const stopBtn = document.getElementById('stopBtn');
-    if (stopBtn) stopBtn.addEventListener('click', togglePause);
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resumeBtn = document.getElementById('resumeBtn');
+    if (pauseBtn) pauseBtn.addEventListener('click', pauseCurrent);
+    if (resumeBtn) resumeBtn.addEventListener('click', resumePaused);
     renderDoctorDashboard();
 }
 
@@ -516,50 +501,30 @@ function skipCurrentPatient() {
     renderDoctorDashboard();
 }
 
-function togglePause() {
+function pauseCurrent() {
     const data = getData();
     const current = getCurrentPatient(data);
+    if (!current) return alert('No active consultation to pause');
 
-    if (current) {
-        // Pause current consulting patient: accumulate elapsed and stop timer
-        current.accumulatedSeconds = (Number(current.accumulatedSeconds) || 0) + getElapsedSeconds(current);
-        delete current.startedAt;
-        current.status = 'paused';
-        saveData(data);
-        renderDoctorDashboard();
-        return;
-    }
+    // accumulate elapsed and stop timer
+    current.accumulatedSeconds = (Number(current.accumulatedSeconds) || 0) + getElapsedSeconds(current);
+    delete current.startedAt;
+    current.status = 'paused';
 
-    // If no one is consulting, resume the earliest paused patient (FIFO)
-    const paused = data.patients.find(p => p.status === 'paused');
-    if (!paused) return alert('No paused session to resume');
-
-    // Prevent resume when someone is consulting
-    const someoneConsulting = getCurrentPatient(data);
-    if (someoneConsulting) return alert('Cannot resume while another patient is being consulted');
-
-    paused.status = 'consulting';
-    paused.startedAt = new Date().toISOString();
     saveData(data);
     renderDoctorDashboard();
 }
 
-function deletePatient(token) {
-    if (!window.confirm('Are you sure you want to delete this patient? This action cannot be undone.')) return;
+function resumePaused() {
     const data = getData();
-    const index = data.patients.findIndex(p => String(p.token) === String(token));
-    if (index === -1) return alert('Patient not found');
+    const someoneConsulting = getCurrentPatient(data);
+    if (someoneConsulting) return alert('Cannot resume while another patient is being consulted');
 
-    const wasConsulting = data.patients[index].status === 'consulting';
-    data.patients.splice(index, 1);
+    const paused = data.patients.find(p => p.status === 'paused');
+    if (!paused) return alert('No paused session to resume');
 
-    if (wasConsulting) {
-        const next = getWaitingPatients(data)[0];
-        if (next) {
-            next.status = 'consulting';
-            next.startedAt = new Date().toISOString();
-        }
-    }
+    paused.status = 'consulting';
+    paused.startedAt = new Date().toISOString();
 
     saveData(data);
     renderDoctorDashboard();
@@ -591,6 +556,20 @@ function renderDoctorDashboard() {
     document.getElementById('skipBtn').disabled = !current;
     document.getElementById('skipBtn').style.opacity = current ? '1' : '.55';
 
+    // Pause / Resume buttons state
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resumeBtn = document.getElementById('resumeBtn');
+    const pausedExists = data.patients.some(p => p.status === 'paused');
+
+    if (pauseBtn) {
+        pauseBtn.disabled = !current;
+        pauseBtn.style.opacity = current ? '1' : '.55';
+    }
+    if (resumeBtn) {
+        resumeBtn.disabled = !pausedExists || !!current;
+        resumeBtn.style.opacity = (!pausedExists || !!current) ? '.55' : '1';
+    }
+
     const queue = data.patients.filter(patient => patient.status !== 'completed');
     table.innerHTML = queue.length
         ? queue.map(patient => `<tr>
@@ -602,21 +581,6 @@ function renderDoctorDashboard() {
             <td>${patient.status === 'consulting' ? 'Now' : `${getPosition(patient, data)} in queue`}</td>
         </tr>`).join('')
         : '<tr><td class="empty-row" colspan="6">No patients are waiting for consultation.</td></tr>';
-
-    // Update Stop/Resume button text and state
-    const stopBtn = document.getElementById('stopBtn');
-    if (stopBtn) {
-        if (current) {
-            stopBtn.textContent = 'PAUSE';
-            stopBtn.disabled = false;
-            stopBtn.style.opacity = '1';
-        } else {
-            const paused = data.patients.find(p => p.status === 'paused');
-            stopBtn.textContent = paused ? 'RESUME' : 'PAUSE';
-            stopBtn.disabled = !paused;
-            stopBtn.style.opacity = paused ? '1' : '.55';
-        }
-    }
 
     renderHistory(data);
 }
