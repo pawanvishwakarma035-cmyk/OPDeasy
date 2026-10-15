@@ -125,8 +125,14 @@ function formatStatus(status) {
     return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
+// Display times in 12-hour format (local timezone)
 function formatTime(isoString) {
-    return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (!isoString) return '--';
+    try {
+        return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    } catch (e) {
+        return '--';
+    }
 }
 
 function formatDate(isoString) {
@@ -399,7 +405,7 @@ function setupRegistration() {
         }
 
         setText('estimatedWait', formatDuration(estimatedWaitSeconds));
-        setText('expectedTime', new Date(Date.now() + estimatedWaitSeconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        setText('expectedTime', new Date(Date.now() + estimatedWaitSeconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }));
 
         document.getElementById('registrationNotice').classList.add('show');
         form.reset();
@@ -420,15 +426,38 @@ function renderLivePatientList() {
 
     const data = getData();
     const activePatients = getActivePatients(data).slice(0, 10);
+    const consultation = getConsultationSummary(data);
+    const defaultAvg = consultation.averageSeconds || 300; // fallback to 5 minutes per patient
+    const current = getCurrentPatient(data);
+
+    // compute remaining time for current patient (in seconds)
+    let currentRemaining = 0;
+    if (current) {
+        const currentElapsed = (Number(current.accumulatedSeconds) || 0) + getElapsedSeconds(current);
+        currentRemaining = Math.max(0, defaultAvg - currentElapsed);
+    }
 
     table.innerHTML = activePatients.length
-        ? activePatients.map(patient => `<tr>
-            <td>${patient.token}</td>
-            <td>${escapeHtml(patient.name)}</td>
-            <td>${patient.status === 'consulting' ? 'Now serving' : getPosition(patient, data)}</td>
-            <td><span class="status ${patient.status}">${formatStatus(patient.status)}</span></td>
-        </tr>`).join('')
-        : '<tr><td class="empty-row" colspan="4">No patients have registered yet.</td></tr>';
+        ? activePatients.map(patient => {
+            const position = getPosition(patient, data) || 1;
+            let estimatedWaitSeconds = 0;
+            if (patient.status === 'consulting') {
+                estimatedWaitSeconds = 0;
+            } else {
+                estimatedWaitSeconds = Math.max(0, (position - 1) * defaultAvg + currentRemaining);
+            }
+            const expectedAt = new Date(Date.now() + estimatedWaitSeconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+
+            return `<tr>
+                <td>${patient.token}</td>
+                <td>${escapeHtml(patient.name)}</td>
+                <td>${patient.status === 'consulting' ? 'Now serving' : getPosition(patient, data)}</td>
+                <td><span class="status ${patient.status}">${formatStatus(patient.status)}</span></td>
+                <td>${patient.status === 'consulting' ? 'Now' : formatDuration(estimatedWaitSeconds)}</td>
+                <td>${patient.status === 'consulting' ? formatTime(patient.startedAt || patient.createdAt) : expectedAt}</td>
+            </tr>`;
+        }).join('')
+        : '<tr><td class="empty-row" colspan="6">No patients have registered yet.</td></tr>';
 }
 
 function setupDoctorDashboard() {
