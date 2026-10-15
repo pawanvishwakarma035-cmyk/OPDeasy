@@ -49,16 +49,6 @@ function getData() {
             history: Array.isArray(saved.history) ? saved.history : []
         };
 
-        // Migration: convert any previously 'paused' sessions back to 'waiting'
-        if (Array.isArray(data.patients)) {
-            data.patients.forEach(p => {
-                if (p && p.status === 'paused') {
-                    p.status = 'waiting';
-                    delete p.startedAt; // ensure timer stopped
-                }
-            });
-        }
-
         const dayStartedAt = Date.parse(data.dayStartedAt);
 
         if (!Number.isFinite(dayStartedAt) || Date.now() - dayStartedAt >= DAY_RESET_MS) {
@@ -101,14 +91,14 @@ function getElapsedSeconds(patient) {
 function getConsultationSummary(data = getData()) {
     const current = getCurrentPatient(data);
     const completed = data.patients.filter(patient => patient.status === 'completed').length;
-    const pausedTime = getWaitingPatients(data).reduce(
+    const pausedTime = data.patients.reduce(
         (seconds, patient) => seconds + (Number(patient.accumulatedSeconds) || 0),
         0
     );
     const currentTime = current
         ? (Number(current.accumulatedSeconds) || 0) + getElapsedSeconds(current)
         : 0;
-    const totalSeconds = (Number(data.totalConsultationSeconds) || 0) + pausedTime + currentTime;
+    const totalSeconds = (Number(data.totalConsultationSeconds) || 0) + currentTime;
     const averageSeconds = completed || current ? (
         (Number(data.totalConsultationSeconds) || 0) + currentTime
     ) / (completed + (current ? 1 : 0)) : 0;
@@ -128,9 +118,8 @@ function getPosition(patient, data = getData()) {
 
     if (patient.status === 'consulting') return 0;
 
-    // Position among non-completed, non-consulting patients (preserves paused/waiting order)
-    const activeQueue = data.patients.filter(p => p.status !== 'completed' && p.status !== 'consulting');
-    return activeQueue.findIndex(item => item.token === patient.token) + 1;
+    const waiting = data.patients.filter(p => p.status === 'waiting');
+    return waiting.findIndex(item => item.token === patient.token) + 1;
 }
 
 function formatStatus(status) {
@@ -462,14 +451,13 @@ function renderLivePatientList() {
 
             return `<tr>
                 <td>${patient.token}</td>
-                <td>${escapeHtml(patient.name)}</nobr></td>
+                <td>${escapeHtml(patient.name)}</td>
                 <td>${patient.status === 'consulting' ? 'Now serving' : getPosition(patient, data)}</td>
                 <td><span class="status ${patient.status}">${formatStatus(patient.status)}</span></td>
                 <td>${patient.status === 'consulting' ? 'Now' : formatDuration(estimatedWaitSeconds)}</td>
                 <td>${patient.status === 'consulting' ? formatTime(patient.startedAt || patient.createdAt) : expectedAt}</td>
             </tr>`;
-        }).join(''
-        )
+        }).join('')
         : '<tr><td class="empty-row" colspan="6">No patients have registered yet.</td></tr>';
 }
 
@@ -478,13 +466,8 @@ function setupDoctorDashboard() {
 
     document.getElementById('nextBtn').addEventListener('click', serveNextPatient);
     document.getElementById('skipBtn').addEventListener('click', skipCurrentPatient);
-    const deleteCurrentBtn = document.getElementById('deleteCurrentBtn');
-    if (deleteCurrentBtn) deleteCurrentBtn.addEventListener('click', () => {
-        const data = getData();
-        const current = getCurrentPatient(data);
-        if (!current) return alert('No current patient to delete');
-        deletePatient(current.token);
-    });
+    const stopBtn = document.getElementById('stopBtn');
+    if (stopBtn) stopBtn.addEventListener('click', togglePause);
     renderDoctorDashboard();
 }
 
@@ -529,6 +512,34 @@ function skipCurrentPatient() {
         next.startedAt = new Date().toISOString();
     }
 
+    saveData(data);
+    renderDoctorDashboard();
+}
+
+function togglePause() {
+    const data = getData();
+    const current = getCurrentPatient(data);
+
+    if (current) {
+        // Pause current consulting patient: accumulate elapsed and stop timer
+        current.accumulatedSeconds = (Number(current.accumulatedSeconds) || 0) + getElapsedSeconds(current);
+        delete current.startedAt;
+        current.status = 'paused';
+        saveData(data);
+        renderDoctorDashboard();
+        return;
+    }
+
+    // If no one is consulting, resume the earliest paused patient (FIFO)
+    const paused = data.patients.find(p => p.status === 'paused');
+    if (!paused) return alert('No paused session to resume');
+
+    // Prevent resume when someone is consulting
+    const someoneConsulting = getCurrentPatient(data);
+    if (someoneConsulting) return alert('Cannot resume while another patient is being consulted');
+
+    paused.status = 'consulting';
+    paused.startedAt = new Date().toISOString();
     saveData(data);
     renderDoctorDashboard();
 }
@@ -589,16 +600,23 @@ function renderDoctorDashboard() {
             <td>${formatTime(patient.createdAt)}</td>
             <td><span class="status ${patient.status}">${formatStatus(patient.status)}</span></td>
             <td>${patient.status === 'consulting' ? 'Now' : `${getPosition(patient, data)} in queue`}</td>
-            <td><button class="btn delete-patient" data-token="${patient.token}">Delete</button></td>
         </tr>`).join('')
-        : '<tr><td class="empty-row" colspan="7">No patients are waiting for consultation.</td></tr>';
+        : '<tr><td class="empty-row" colspan="6">No patients are waiting for consultation.</td></tr>';
 
-    // Wire up delete buttons
-    const deleteButtons = table.querySelectorAll('.delete-patient');
-    deleteButtons.forEach(btn => btn.addEventListener('click', (e) => {
-        const token = e.currentTarget.dataset.token;
-        deletePatient(token);
-    }));
+    // Update Stop/Resume button text and state
+    const stopBtn = document.getElementById('stopBtn');
+    if (stopBtn) {
+        if (current) {
+            stopBtn.textContent = 'PAUSE';
+            stopBtn.disabled = false;
+            stopBtn.style.opacity = '1';
+        } else {
+            const paused = data.patients.find(p => p.status === 'paused');
+            stopBtn.textContent = paused ? 'RESUME' : 'PAUSE';
+            stopBtn.disabled = !paused;
+            stopBtn.style.opacity = paused ? '1' : '.55';
+        }
+    }
 
     renderHistory(data);
 }
