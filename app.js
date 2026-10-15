@@ -78,6 +78,10 @@ function getWaitingPatients(data = getData()) {
     return data.patients.filter(patient => patient.status === 'waiting');
 }
 
+function getPausedPatients(data = getData()) {
+    return data.patients.filter(patient => patient.status === 'paused');
+}
+
 function getCurrentPatient(data = getData()) {
     return data.patients.find(patient => patient.status === 'consulting') || null;
 }
@@ -117,8 +121,8 @@ function getPosition(patient, data = getData()) {
 
     if (patient.status === 'consulting') return 0;
 
-    const waiting = data.patients.filter(p => p.status === 'waiting');
-    return waiting.findIndex(item => item.token === patient.token) + 1;
+    const queue = data.patients.filter(p => p.status === 'waiting' || p.status === 'paused');
+    return queue.findIndex(item => item.token === patient.token) + 1;
 }
 
 function formatStatus(status) {
@@ -436,7 +440,7 @@ function renderLivePatientList() {
                 <td>${patient.token}</td>
                 <td>${escapeHtml(patient.name)}</td>
                 <td>${patient.status === 'consulting' ? 'Now serving' : getPosition(patient, data)}</td>
-                <td><span class=\"status ${patient.status}\">${formatStatus(patient.status)}</span></td>
+                <td><span class="status ${patient.status}">${formatStatus(patient.status)}</span></td>
                 <td>${patient.status === 'consulting' ? 'Now' : formatDuration(estimatedWaitSeconds)}</td>
                 <td>${patient.status === 'consulting' ? formatTime(patient.startedAt || patient.createdAt) : expectedAt}</td>
             </tr>`;
@@ -505,6 +509,7 @@ function pauseCurrent() {
     const data = getData();
     const current = getCurrentPatient(data);
     if (!current) return alert('No active consultation to pause');
+    if (current.status === 'paused') return alert('This consultation is already paused');
 
     // accumulate elapsed and stop timer
     current.accumulatedSeconds = (Number(current.accumulatedSeconds) || 0) + getElapsedSeconds(current);
@@ -520,7 +525,7 @@ function resumePaused() {
     const someoneConsulting = getCurrentPatient(data);
     if (someoneConsulting) return alert('Cannot resume while another patient is being consulted');
 
-    const paused = data.patients.find(p => p.status === 'paused');
+    const paused = getPausedPatients(data).sort((a, b) => (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || ''))[0];
     if (!paused) return alert('No paused session to resume');
 
     paused.status = 'consulting';
@@ -559,7 +564,7 @@ function renderDoctorDashboard() {
     // Pause / Resume buttons state
     const pauseBtn = document.getElementById('pauseBtn');
     const resumeBtn = document.getElementById('resumeBtn');
-    const pausedExists = data.patients.some(p => p.status === 'paused');
+    const pausedExists = getPausedPatients(data).length > 0;
 
     if (pauseBtn) {
         pauseBtn.disabled = !current;
@@ -578,7 +583,7 @@ function renderDoctorDashboard() {
             <td>${patient.age || '--'}</td>
             <td>${formatTime(patient.createdAt)}</td>
             <td><span class="status ${patient.status}">${formatStatus(patient.status)}</span></td>
-            <td>${patient.status === 'consulting' ? 'Now' : `${getPosition(patient, data)} in queue`}</td>
+            <td>${patient.status === 'consulting' ? 'Now' : `${getPosition(patient, data) || 0} in queue`}</td>
         </tr>`).join('')
         : '<tr><td class="empty-row" colspan="6">No patients are waiting for consultation.</td></tr>';
 
