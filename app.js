@@ -377,6 +377,30 @@ function setupRegistration() {
         savePatientToDatabase(patient);
         
         setText('registeredToken', patient.token);
+
+        // Compute estimated wait and expected time for the newly registered patient
+        const position = getPosition(patient, data) || 1;
+        const consultation = getConsultationSummary(data);
+        const avgSeconds = consultation.averageSeconds || 0;
+        const defaultAvg = avgSeconds || 300; // fallback 5 minutes
+
+        const current = getCurrentPatient(data);
+        let estimateRemaining = 0;
+        if (current) {
+            const currentElapsed = (Number(current.accumulatedSeconds) || 0) + getElapsedSeconds(current);
+            estimateRemaining = Math.max(0, defaultAvg - currentElapsed);
+        }
+
+        let estimatedWaitSeconds = 0;
+        if (patient.status === 'consulting') {
+            estimatedWaitSeconds = 0;
+        } else {
+            estimatedWaitSeconds = Math.max(0, (position - 1) * defaultAvg + estimateRemaining);
+        }
+
+        setText('estimatedWait', formatDuration(estimatedWaitSeconds));
+        setText('expectedTime', new Date(Date.now() + estimatedWaitSeconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+
         document.getElementById('registrationNotice').classList.add('show');
         form.reset();
         document.getElementById('registrationNotice').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
