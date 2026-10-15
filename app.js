@@ -48,6 +48,17 @@ function getData() {
             ...saved,
             history: Array.isArray(saved.history) ? saved.history : []
         };
+
+        // Migration: convert any previously 'paused' sessions back to 'waiting'
+        if (Array.isArray(data.patients)) {
+            data.patients.forEach(p => {
+                if (p && p.status === 'paused') {
+                    p.status = 'waiting';
+                    delete p.startedAt; // ensure timer stopped
+                }
+            });
+        }
+
         const dayStartedAt = Date.parse(data.dayStartedAt);
 
         if (!Number.isFinite(dayStartedAt) || Date.now() - dayStartedAt >= DAY_RESET_MS) {
@@ -451,7 +462,7 @@ function renderLivePatientList() {
 
             return `<tr>
                 <td>${patient.token}</td>
-                <td>${escapeHtml(patient.name)}</td>
+                <td>${escapeHtml(patient.name)}</nobr></td>
                 <td>${patient.status === 'consulting' ? 'Now serving' : getPosition(patient, data)}</td>
                 <td><span class="status ${patient.status}">${formatStatus(patient.status)}</span></td>
                 <td>${patient.status === 'consulting' ? 'Now' : formatDuration(estimatedWaitSeconds)}</td>
@@ -467,8 +478,6 @@ function setupDoctorDashboard() {
 
     document.getElementById('nextBtn').addEventListener('click', serveNextPatient);
     document.getElementById('skipBtn').addEventListener('click', skipCurrentPatient);
-    const stopBtn = document.getElementById('stopBtn');
-    if (stopBtn) stopBtn.addEventListener('click', togglePause);
     const deleteCurrentBtn = document.getElementById('deleteCurrentBtn');
     if (deleteCurrentBtn) deleteCurrentBtn.addEventListener('click', () => {
         const data = getData();
@@ -520,34 +529,6 @@ function skipCurrentPatient() {
         next.startedAt = new Date().toISOString();
     }
 
-    saveData(data);
-    renderDoctorDashboard();
-}
-
-function togglePause() {
-    const data = getData();
-    const current = getCurrentPatient(data);
-
-    if (current) {
-        // Pause current consulting patient
-        current.accumulatedSeconds = (Number(current.accumulatedSeconds) || 0) + getElapsedSeconds(current);
-        delete current.startedAt;
-        current.status = 'paused';
-        saveData(data);
-        renderDoctorDashboard();
-        return;
-    }
-
-    // If no one is consulting, try to resume the first paused patient
-    const paused = data.patients.find(p => p.status === 'paused');
-    if (!paused) return alert('No paused session to resume');
-
-    // If there is currently someone consulting (edge-case), prevent resume
-    const someoneConsulting = getCurrentPatient(data);
-    if (someoneConsulting) return alert('Cannot resume while another patient is being consulted');
-
-    paused.status = 'consulting';
-    paused.startedAt = new Date().toISOString();
     saveData(data);
     renderDoctorDashboard();
 }
@@ -618,21 +599,6 @@ function renderDoctorDashboard() {
         const token = e.currentTarget.dataset.token;
         deletePatient(token);
     }));
-
-    // Update Stop/Resume button text and state
-    const stopBtn = document.getElementById('stopBtn');
-    if (stopBtn) {
-        if (current) {
-            stopBtn.textContent = 'STOP';
-            stopBtn.disabled = false;
-            stopBtn.style.opacity = '1';
-        } else {
-            const paused = data.patients.find(p => p.status === 'paused');
-            stopBtn.textContent = paused ? 'RESUME' : 'STOP';
-            stopBtn.disabled = !paused;
-            stopBtn.style.opacity = paused ? '1' : '.55';
-        }
-    }
 
     renderHistory(data);
 }
