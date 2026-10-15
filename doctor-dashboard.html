@@ -71,9 +71,21 @@
                     <strong id="currentAge">--</strong>
                 </div>
             </div>
+            <div class="current-meta">
+                <div>
+                    <span>Estimated Time</span>
+                    <strong id="currentEstimated">--</strong>
+                </div>
+                <div>
+                    <span>Arrival</span>
+                    <strong id="currentArrival">--</strong>
+                </div>
+            </div>
             <div class="action-buttons">
                 <button id="nextBtn" class="btn next" type="button">NEXT Patient</button>
                 <button id="skipBtn" class="btn skip" type="button">SKIP Patient</button>
+                <button id="stopBtn" class="btn stop" type="button">STOP</button>
+                <button id="deleteCurrentBtn" class="btn delete" type="button">Delete Patient</button>
             </div>
         </section>
 
@@ -92,10 +104,11 @@
                             <th>Arrival Time</th>
                             <th>Status</th>
                             <th>Estimated Wait</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="doctorQueueTable">
-                        <tr><td class="empty-row" colspan="6">No patients are waiting for consultation.</td></tr>
+                        <tr><td class="empty-row" colspan="7">No patients are waiting for consultation.</td></tr>
                     </tbody>
                 </table>
             </div>
